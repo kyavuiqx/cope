@@ -71,7 +71,7 @@ class RatioLinearLearner:
     res = np.vstack([dim_list, res_list])
     res.transpose()
     '''
-    def __init__(self, dataset, policy, cplearner, gamma=0.9, ndim=100, l2penalty=0.00001, use_mediator=True):
+    def __init__(self, dataset, policy, cplearner, gamma=0.9, ndim=100, l2penalty=1.0, use_mediator=True):
         self.use_mediator = use_mediator
 
         self.state = np.copy(dataset['state'])
@@ -89,11 +89,11 @@ class RatioLinearLearner:
         self.l2penalty = l2penalty
         self.beta = None
         self.rbf_feature = RBFSampler(random_state=1, n_components=ndim)
-
+        self.rbf_feature.fit(np.vstack((self.state, self.s0)))
         pass
 
     def feature_engineering(self, feature):
-        feature_new = self.rbf_feature.fit_transform(feature)
+        feature_new = self.rbf_feature.transform(feature)
         feature_new = np.hstack([np.repeat(1, feature_new.shape[0]).reshape(-1, 1), feature_new])
         return feature_new
 
@@ -136,7 +136,7 @@ class RatioLinearLearner:
         for i in range(self.state.shape[0]):
             design_matrix += np.matmul(psi[i].reshape(-1, 1), psi_minus_psi_next[i].reshape(1, -1))
         # design_matrix = np.matmul(psi.transpose(), psi_minus_psi_next)
-        design_matrix /= (self.state.shape[0] + self.s0.shape[0])
+        design_matrix /= self.state.shape[0]
         # print(design_matrix)
         penalty_matrix = np.diagflat(np.repeat(self.l2penalty, design_matrix.shape[0]))
         # if psi.shape[0] <= psi.shape[1]:
@@ -173,8 +173,8 @@ class RatioLinearLearner:
             x_state = np.copy(state)
         psi = self.feature_engineering(x_state)
         ratio = np.matmul(psi, self.beta).flatten()
-        ratio_min = 1 - truncate
-        ratio_max = 1 + truncate
+        ratio_min = 1 / truncate
+        ratio_max = truncate
         ratio = np.clip(ratio, a_min=ratio_min, a_max=ratio_max)
         if state.shape[0] > 1:
             if normalize:

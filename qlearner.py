@@ -2,7 +2,7 @@
 
 import numpy as np
 from sklearn.kernel_approximation import RBFSampler
-from sklearn.linear_model import SGDRegressor, LinearRegression
+from sklearn.linear_model import SGDRegressor, LinearRegression, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from problearner import PMLearner, PALearner
@@ -12,7 +12,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.base import clone
 
 class Qlearner:
-    def __init__(self, data, target_policy, PMLearner, PALearner, gamma=0.9, 
+    def __init__(self, data, target_policy, PMLearner, PALearner, gamma=0.9,
                  epoch=1000, verbose=False, model='forest', rbf_dim=5, use_mediator=True, eps=1e-2):
         '''
 
@@ -46,6 +46,9 @@ class Qlearner:
         self.data = data
         self.action = np.copy(data[1])
         self.mediator = np.copy(data[2])
+        self.action = np.reshape(self.action, (-1, 1))
+        self.mediator = np.reshape(self.mediator, (-1, 1))
+        
         self.reward = np.copy(data[3])
         self.pmlearner = PMLearner
         self.palearner = PALearner
@@ -79,15 +82,35 @@ class Qlearner:
         self.model = model
         hyperparameter = rbf_dim
         if self.model == "linear":
-            self.rbf_feature = RBFSampler(
-                random_state=1, n_components=hyperparameter)
-            self.q_model = LinearRegression()
+            self.rbf_feature = RBFSampler(random_state=1, n_components=hyperparameter)
+            X_action = self.ohe_action_feature.fit_transform(self.action)
+            if X_action.ndim == 1:
+                X_action = X_action.reshape(-1, self.action_dummy_size)
+            if self.use_mediator:
+                X_mediator = self.ohe_mediator_feature.transform(self.mediator)
+                if X_mediator.ndim == 1:
+                    X_mediator = X_mediator.reshape(-1, self.mediator_dummy_size)
+                X_am = np.hstack((X_action, X_mediator))
+            else:
+                X_am = X_action
+
+            ## transform and concat
+            # X_state = self.rbf_feature.fit_transform(self.data[0])
+            # X = np.hstack((X_state, X_am))
+
+            ## concat and transform
+            X_state = np.copy(self.data[0])
+            X = np.hstack((X_state, X_am))
+            if self.model == "linear":
+                self.train_X = self.rbf_feature.fit_transform(X)
+
+            # self.q_model = LinearRegression(random_state=1)
+            self.q_model = Ridge(solver='lsqr', alpha=1e-5, random_state=1)
         elif model == "forest":
             # print(hyperparameter)
             # self.q_model = RandomForestRegressor(
-                # max_depth=6, random_state=1, min_samples_leaf=hyperparameter)
-            self.q_model = RandomForestRegressor(
-                random_state=1, min_samples_leaf=hyperparameter)
+            # max_depth=6, random_state=1, min_samples_leaf=hyperparameter)
+            self.q_model = RandomForestRegressor(random_state=1, min_samples_leaf=hyperparameter)
         else:
             pass
 
@@ -100,10 +123,6 @@ class Qlearner:
         self.verbose = verbose
         self.eps = eps
         pass
-
-    def preprocess(self):
-        self.action = np.reshape(self.action, (-1, 1))
-        self.mediator = np.reshape(self.mediator, (-1, 1))
 
     def pesudo_response(self, reward, next_state, policy_action):
         q_next_state = np.zeros(shape=reward.shape).flatten()
@@ -173,34 +192,12 @@ class Qlearner:
 
     def one_batch_fit(self):
         pesudo_y = self.pesudo_response(np.copy(self.data[3]), np.copy(self.data[4]), np.copy(self.policy_action))
-        
-        X_action = self.ohe_action_feature.fit_transform(self.action)
-        if X_action.ndim == 1:
-            X_action = X_action.reshape(-1, self.action_dummy_size)
-        
-        if self.use_mediator:
-            X_mediator = self.ohe_mediator_feature.transform(self.mediator)
-            if X_mediator.ndim == 1:
-                X_mediator = X_mediator.reshape(-1, self.mediator_dummy_size)
-            X_am = np.hstack((X_action, X_mediator))
-        else:
-            X_am = X_action
 
-        ## transform and concat
-        # X_state = self.rbf_feature.fit_transform(self.data[0])
-        # X = np.hstack((X_state, X_am))
-
-        ## concat and transform
-        X_state = np.copy(self.data[0])
-        X = np.hstack((X_state, X_am))
-        if self.model == "linear":
-            X = self.rbf_feature.fit_transform(X)
-        
         self.q_model = clone(self.q_model)
-        self.q_model.fit(X, pesudo_y)
+        self.q_model.fit(self.train_X, pesudo_y)
         self.q_model_list.append(self.q_model)
-        self.score_array[self.iteration_time] = self.q_model.score(X, pesudo_y)
-        error = pesudo_y - self.q_model.predict(X)
+        self.score_array[self.iteration_time] = self.q_model.score(self.train_X, pesudo_y)
+        error = pesudo_y - self.q_model.predict(self.train_X)
         self.bias_array[self.iteration_time] = np.mean(error)
         self.rmse_array[self.iteration_time] = np.sqrt(np.mean(np.square(error)))
         self.rmedianse_array[self.iteration_time] = np.sqrt(np.median(np.square(error)))
@@ -209,15 +206,25 @@ class Qlearner:
         pass
 
     def fit(self):
-        self.preprocess()
+        # self.preprocess()
         for i in range(self.epoch):
             self.iteration_time = i
             self.one_batch_fit()
             if i >= 1:
                 score_difference = self.score_array[i] - self.score_array[i - 1]
                 rmse_difference = self.rmse_array[i] - self.rmse_array[i - 1]
+                if self.model == "linear":
+                    coef_diff1 = self.q_model_list[i].coef_ - self.q_model_list[i - 1].coef_
+                    coef_diff1 = np.linalg.norm(coef_diff1, ord=1)
+                    coef_diff2 = np.abs(self.q_model_list[i].intercept_ - self.q_model_list[i - 1].intercept_)
+                    coef_diff = coef_diff1 + coef_diff2
+                    coef_norm = np.linalg.norm(self.q_model_list[i].coef_, ord=1)
+                    coef_norm += np.abs(self.q_model_list[i].intercept_)
+                    relative_coef_diff = coef_diff / coef_norm
+                    # print((coef_diff, coef_norm, relative_coef_diff))
+                    pass
                 # if score_difference < 1e-3 and self.iteration_time >= 5:
-                if np.abs(score_difference) < self.eps:
+                if relative_coef_diff < self.eps or coef_diff < 1e-4:
                     if rmse_difference > 0:
                         self.q_model = self.q_model_list[i - 1]
                     else:
@@ -267,7 +274,7 @@ class Qlearner:
             x_state = np.copy(state)
             x = np.hstack((x_state, x_am))
             if self.model == "linear":
-                x = self.rbf_feature.fit_transform(x)
+                x = self.rbf_feature.transform(x)
 
             pred = self.q_model.predict(x)
 

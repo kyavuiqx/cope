@@ -206,6 +206,7 @@ class OPEDR:
         prob_action = self.palearner.get_pa_prediction(state, action)
         term_weight_reward = reward * ratio_state * target_pa / prob_action
         term_weight_reward = term_weight_reward / (1.0 - self.gamma)
+        self.is_arr = np.copy(term_weight_reward)
         term_weight_reward = np.mean(term_weight_reward)
         return term_weight_reward
 
@@ -257,7 +258,7 @@ class OPEDR:
 
         ## non-deterministic policy 
         # intercept = self.qLearner.get_q_prediction(s0, policy_action_s0)
-
+        self.intercept_arr = np.copy(intercept)
         intercept = np.mean(intercept)
         return intercept
 

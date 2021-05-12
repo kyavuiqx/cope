@@ -26,6 +26,8 @@ class Simulator:
     def save_smc2reward_model(self, state, mediator, confounder, random):
         if self.dim_state == 1:
             rmean = 0.5*np.clip(confounder, a_min=0, a_max=1)*state[0] + 0.5*np.clip(confounder, a_min=0, a_max=1)*mediator - 0.1*state[0]  # new best
+        elif self.dim_state >= 2:
+            rmean = 0.5*np.clip(confounder, a_min=0, a_max=1)*np.sum(state) + 0.5*np.clip(confounder, a_min=0, a_max=1)*mediator - 0.1*np.sum(state)  # new best
             pass
         if random:
             reward = np.random.normal(size=1, loc=rmean, scale=0.1)
@@ -35,13 +37,8 @@ class Simulator:
 
     def save_smc2nextstate_model(self, state, mediator, confounder):
         next_state = np.copy(state)
-        if self.dim_state == 3: 
-            next_state[0] = 0.75*(2*mediator - 1.0)*next_state[0]
-            next_state[1] = 0.75*(1.0 - 2*mediator)*next_state[1]
-            next_state[2] = 0.5*confounder
-        elif self.dim_state == 2:
-            next_state[0] = 0.75*(2*mediator - 1.0)*next_state[0]
-            next_state[1] = 0.75*(1.0 - 2*mediator) * next_state[1] + 0.5*confounder
+        if self.dim_state >= 2:
+            next_state = 0.5*np.clip(confounder, a_min=0, a_max=1) * state + 0.5*np.clip(confounder, a_min=0, a_max=1)*mediator - 0.1*state
         elif self.dim_state == 1:
             next_state[0] = 0.5*np.clip(confounder, a_min=0, a_max=1)*state[0] + 0.5*np.clip(confounder, a_min=0, a_max=1)*mediator - 0.1*state[0]
         else:

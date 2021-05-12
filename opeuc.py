@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import tensorflow as tf
 import numpy as np
 from problearner import PMLearner, PALearner
 from qlearner import Qlearner
@@ -84,14 +83,17 @@ class OPEUC:
         data_num = self.state.shape[0]
         self.eif_arr = np.array(range(data_num), dtype=float)
         if self.matrix_based_learning:
-            intercept = self.compute_intercept_2(self.s0, self.policy_action_s0)
+            intercept_arr = self.compute_intercept_2(self.s0, self.policy_action_s0)
+            intercept = np.mean(intercept_arr)
             termI1 = self.compute_termI1_2(self.state, self.action, self.mediator,
                                            self.reward, self.next_state, self.policy_action, self.policy_action_next)
             termI2 = self.compute_termI2_2(self.state, self.action, self.mediator, self.reward, self.next_state, self.policy_action)
             termI3 = self.compute_termI3_2(self.state, self.action, self.mediator, self.reward, self.next_state, self.policy_action)
-            # print((termI1[0], termI2[0], termI3[0]))
+            # print((np.mean(termI1), np.mean(termI2), np.mean(termI3)))
+            # print((np.std(termI1), np.std(termI2), np.std(termI3)))
             # self.eif_arr = (termI1 + termI2 + termI3) / (1 - self.gamma)
             self.eif_arr = termI1 + termI2 + termI3
+            self.intercept_arr = np.copy(intercept_arr)
             # print(np.array([np.mean(termI1), np.mean(termI2), np.mean(termI3)]))
             self.eif_arr += intercept
         else:
@@ -231,8 +233,8 @@ class OPEUC:
         return termI2
 
     def compute_termI2_2(self, state, action, mediator, reward, next_state, policy_action):
-        termI2_complete = np.zeros(reward.shape)
-
+        data_point_num = reward.shape
+        termI2_complete = np.zeros(data_point_num)
         ## deterministic policy
         # sub_index = np.where(action == policy_action)[0]
         # state = state[sub_index]
@@ -248,22 +250,27 @@ class OPEUC:
             weight_q_sum = np.zeros(reward.shape)
             for mediator_value in self.unique_mediator:
                 mediator_value = mediator_value.reshape(1, -1)
+                # action_value_batch = np.repeat(action_value, data_point_num).flatten().reshape(-1, 1)
+                # pm_est = self.pmlearner.get_pm_prediction(state, action_value_batch, mediator_value)
                 pm_est = self.pmlearner.get_pm_prediction(state, action, mediator_value)
-                q_est = self.qLearner.get_q_prediction(state, action_value, mediator_value)
+                q_est = self.qLearner.get_q_prediction(state, action_value, mediator_value)     
                 weight_q_sum += pm_est * q_est
                 pass
             q_diff = q_fix_action - weight_q_sum
             q_diff *= self.palearner.get_pa_prediction(state, action_value)
             termI2 += q_diff
             pass
-
-        termI2 *= self.ratiolearner.get_r_prediction(state)
+        
+        ratio_pred = self.ratiolearner.get_r_prediction(state)
+        termI2 *= ratio_pred
 
         ## deterministic policy
         # termI2_complete[sub_index] = termI2
         
         ## non-deterministic policy
-        pa_ratio = self.target_policy_pa(self.target_policy, state, action) / self.palearner.get_pa_prediction(state, action)
+        policy_pa = self.target_policy_pa(self.target_policy, state, action)
+        pa_est = self.palearner.get_pa_prediction(state, action)
+        pa_ratio = policy_pa / pa_est
         termI2_complete = termI2 * pa_ratio
 
         termI2_complete *= 1.0 / (1.0 - self.gamma)
@@ -313,7 +320,8 @@ class OPEUC:
                 q_diff = q_fix_mediator - weight_q_sum
                 q_diff *= policy_pa
                 action_prime_tmp = np.repeat(action_prime, reward.shape[0]).reshape(-1, 1)
-                q_diff *= self.pmlearner.get_pm_prediction(state, action_prime_tmp, mediator_value)
+                pm_est = self.pmlearner.get_pm_prediction(state, action_prime_tmp, mediator_value)
+                q_diff *= pm_est
                 termI3 += q_diff
                 pass
             pass
@@ -373,7 +381,9 @@ class OPEUC:
                     mediator_value = mediator_value.reshape(1, -1)
                     est_pm_value = self.pmlearner.get_pm_prediction(s0, action_prime_batch, mediator_value)
                     est_q_value = self.qLearner.get_q_prediction(s0, action_value, mediator_value)
-                    intercept += est_pm_value * target_pa * est_pa_value * est_q_value
+                    intercept_one = est_pm_value * target_pa * est_pa_value * est_q_value
+                    intercept += intercept_one
+                    # print((mediator_value[0, 0], action_value[0, 0], action_prime[0, 0], intercept_one.mean(), intercept_one.min(), intercept_one.max()))
                     pass
                 pass
             pass
@@ -391,7 +401,7 @@ class OPEUC:
         #             s0, action_value)
         #         intercept += est_q_value * est_pm_value * est_pa_value
 
-        intercept = np.mean(intercept)
+        # intercept = np.mean(intercept)
         return intercept
 
     def get_opeuc(self):
@@ -514,8 +524,7 @@ def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma,
                     s0_test_index = index_s0[1]
                     dataset_train = {'s0': s0[s0_train_index], 'state': iid_dataset[0][train_index], "next_state": iid_dataset[4][train_index],
                                      'action': iid_dataset[1][train_index], 'mediator': iid_dataset[2][train_index]}
-                    rationearner = RatioLinearLearner(
-                        dataset_train, target_policy, pmlearner, ndim=rbf_dim_value)
+                    rationearner = RatioLinearLearner(dataset_train, target_policy, pmlearner, ndim=rbf_dim_value)
                     rationearner.fit()
 
                     new_s0, new_state, new_action, new_mediator, new_reward, new_next_state = s0[s0_test_index], iid_dataset[0][test_index], iid_dataset[
@@ -535,8 +544,7 @@ def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma,
 
         dataset = {'s0': s0, 'state': iid_dataset[0],
                    "next_state": iid_dataset[4], 'action': iid_dataset[1], 'mediator': iid_dataset[2]}
-        rationearner = RatioLinearLearner(
-            dataset, target_policy, pmlearner, ndim=ratio_rbf_dim)
+        rationearner = RatioLinearLearner(dataset, target_policy, pmlearner, ndim=ratio_rbf_dim)
         rationearner.fit()
         # rll_prediction = rationearner.get_ratio_prediction(iid_dataset[0])
         # print("RLL prediction: ", (np.quantile(

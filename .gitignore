@@ -1,2 +1,7 @@
 *.csv
 *.jpg
+configure.sh
+cope_sim.pbs
+double_robust.txt
+*.pyc
+.Rhistory
