@@ -89,8 +89,7 @@ class OPEUC:
                                            self.reward, self.next_state, self.policy_action, self.policy_action_next)
             termI2 = self.compute_termI2_2(self.state, self.action, self.mediator, self.reward, self.next_state, self.policy_action)
             termI3 = self.compute_termI3_2(self.state, self.action, self.mediator, self.reward, self.next_state, self.policy_action)
-            # print((np.mean(termI1), np.mean(termI2), np.mean(termI3)))
-            # print((np.std(termI1), np.std(termI2), np.std(termI3)))
+            # print((termI1[0], termI2[0], termI3[0]))
             # self.eif_arr = (termI1 + termI2 + termI3) / (1 - self.gamma)
             self.eif_arr = termI1 + termI2 + termI3
             self.intercept_arr = np.copy(intercept_arr)
@@ -101,8 +100,7 @@ class OPEUC:
             for i in range(data_num):
                 data_tuple = (self.state[i, :], self.action[i], self.mediator[i],
                             self.reward[i], self.next_state[i], self.policy_action[i])
-                self.eif_arr[i] = self.eif_without_intercept(
-                    data_tuple) + intercept
+                self.eif_arr[i] = self.eif_without_intercept(data_tuple) + intercept
                 # print(self.eif_arr[i])
         opeuc = np.mean(self.eif_arr)
         self.opeuc = opeuc
