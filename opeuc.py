@@ -11,7 +11,8 @@ class OPEUC:
     def __init__(self, dataset,
                  QLearner, RatioLearner,
                  PMLearner, PALearner,
-                 gamma, matrix_based_learning=False, 
+                 time_difference=None, gamma=0.9, 
+                 matrix_based_learning=False, 
                  policy=None):
         '''
         
@@ -50,6 +51,10 @@ class OPEUC:
         self.s0 = np.copy(dataset['s0'])
         self.policy_action_s0 = np.copy(dataset['policy_action_s0'])
         self.target_policy = policy
+        if time_difference is None:
+            self.time_difference = np.ones(dataset['action'].shape[0])
+        else:
+            self.time_difference = np.copy(time_difference)
 
         self.qLearner = QLearner
         self.ratiolearner = RatioLearner
@@ -134,7 +139,7 @@ class OPEUC:
                 pass
             pass
 
-        termI1 += self.gamma * weight_q_value
+        termI1 += np.power(self.gamma, self.time_difference) * weight_q_value
         # print(termI1)
         termI1 *= self.ratiolearner.get_r_prediction(state)
         # print(termI1)
@@ -147,6 +152,8 @@ class OPEUC:
     def compute_termI1_2(self, state, action, mediator, reward, next_state, policy_action, policy_action_next):
         long_term = np.copy(reward)
         data_point_num = long_term.shape[0]
+        time_vary_gamma = np.power(self.gamma, self.time_difference)
+
         ## non-deterministic policy:
         random_pm_ratio = np.zeros(mediator.shape).flatten()
         for action_prime in self.unique_action:
@@ -161,7 +168,7 @@ class OPEUC:
                     est_pm_value = self.pmlearner.get_pm_prediction(next_state, action_prime_batch, mediator_value)
                     est_q_value = self.qLearner.get_q_prediction(next_state, action_value, mediator_value)
 
-                    weight_sum_q = self.gamma * est_pm_value * target_pa * est_pa_value * est_q_value
+                    weight_sum_q = time_vary_gamma * est_pm_value * target_pa * est_pa_value * est_q_value
                     long_term += weight_sum_q
                     pass
                 pass
@@ -194,7 +201,7 @@ class OPEUC:
         
         termI1 *= random_pm_ratio
 
-        termI1 *= 1.0 / (1.0 - self.gamma)
+        termI1 *= 1.0 / (1.0 - time_vary_gamma)
         # termI1 = np.mean(termI1)
         return termI1
 
@@ -271,7 +278,8 @@ class OPEUC:
         pa_ratio = policy_pa / pa_est
         termI2_complete = termI2 * pa_ratio
 
-        termI2_complete *= 1.0 / (1.0 - self.gamma)
+        time_vary_gamma = np.power(self.gamma, self.time_difference)
+        termI2_complete *= 1.0 / (1.0 - time_vary_gamma)
 
         return termI2_complete
 
@@ -339,7 +347,8 @@ class OPEUC:
         #     pass
 
         termI3 *= self.ratiolearner.get_r_prediction(state)
-        termI3 *= 1.0 / (1.0 - self.gamma)
+        time_vary_gamma = np.power(self.gamma, self.time_difference)
+        termI3 *= 1.0 / (1.0 - time_vary_gamma)
 
         # termI3 = np.mean(termI3)
         return termI3
@@ -414,7 +423,8 @@ class OPEUC:
         target_pa = np.array(target_pa).flatten()
         return target_pa
 
-def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma, 
+
+def nuisance_estimate_uc(s0, iid_dataset, target_policy, time_difference, gamma,
                          palearner_setting, pmlearner_setting, qlearner_setting, ratiolearner_setting):
     ## Train conditional probability of action given state
     discrete_state = palearner_setting['discrete_state']
@@ -475,7 +485,8 @@ def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma,
                 new_state, new_action, new_mediator, new_reward, new_next_state = iid_dataset[0][test_index], iid_dataset[
                     1][test_index], iid_dataset[2][test_index], iid_dataset[3][test_index], iid_dataset[4][test_index]
                 qlearner = Qlearner(iid_dataset_train, target_policy, pmlearner,
-                                    palearner, gamma=gamma, epoch=epoch, verbose=verbose,
+                                    palearner, time_difference=time_difference, 
+                                    gamma=gamma, epoch=epoch, verbose=verbose,
                                     model=model, rbf_dim=rbf_dim_value, eps=eps)
                 qlearner.fit()
                 rmse_arr[index] += qlearner.goodness_of_fit(
@@ -491,7 +502,8 @@ def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma,
         pass
 
     qlearner = Qlearner(iid_dataset, target_policy, pmlearner,
-                        palearner, gamma=gamma, epoch=epoch,
+                        palearner, time_difference=time_difference, 
+                        gamma=gamma, epoch=epoch,
                         verbose=verbose, model=model, rbf_dim=rbf_dim, eps=eps)
     qlearner.fit()
 
@@ -522,7 +534,9 @@ def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma,
                     s0_test_index = index_s0[1]
                     dataset_train = {'s0': s0[s0_train_index], 'state': iid_dataset[0][train_index], "next_state": iid_dataset[4][train_index],
                                      'action': iid_dataset[1][train_index], 'mediator': iid_dataset[2][train_index]}
-                    rationearner = RatioLinearLearner(dataset_train, target_policy, pmlearner, ndim=rbf_dim_value)
+                    rationearner = RatioLinearLearner(dataset_train, target_policy, pmlearner, 
+                                                      time_difference=time_difference, gamma=gamma, 
+                                                      ndim=rbf_dim_value)
                     rationearner.fit()
 
                     new_s0, new_state, new_action, new_mediator, new_reward, new_next_state = s0[s0_test_index], iid_dataset[0][test_index], iid_dataset[
@@ -542,7 +556,9 @@ def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma,
 
         dataset = {'s0': s0, 'state': iid_dataset[0],
                    "next_state": iid_dataset[4], 'action': iid_dataset[1], 'mediator': iid_dataset[2]}
-        rationearner = RatioLinearLearner(dataset, target_policy, pmlearner, ndim=ratio_rbf_dim)
+        rationearner = RatioLinearLearner(dataset, target_policy, pmlearner, 
+                                          time_difference=time_difference, gamma=gamma, 
+                                          ndim=ratio_rbf_dim)
         rationearner.fit()
         # rll_prediction = rationearner.get_ratio_prediction(iid_dataset[0])
         # print("RLL prediction: ", (np.quantile(
@@ -551,7 +567,7 @@ def nuisance_estimate_uc(s0, iid_dataset, target_policy, gamma,
 
     return qlearner, rationearner, pmlearner, palearner
 
-def opeuc_run(s0, iid_dataset, target_policy, gamma=0.9,
+def opeuc_run(s0, iid_dataset, target_policy, time_difference=None, gamma=0.9,
               palearner_setting={'discrete_state': False, 'rbf_dim': None, 'cv_score': 'accuracy', 'verbose': True},
               pmlearner_setting={'discrete_state': False, 'discrete_action': False, 'rbf_dim': None, 'cv_score': 'accuracy', 'verbose': True},
               qlearner_setting={'epoch': 100, 'verbose': True, 'rbf_dim': None},
@@ -559,7 +575,7 @@ def opeuc_run(s0, iid_dataset, target_policy, gamma=0.9,
                                     'batch_size': 32, 'epoch': 100, 'lr': 0.01, 'verbose': True},
               new_iid_dataset=None, matrix_based_ope=True):
     qlearner, rationearner, pmlearner, palearner = nuisance_estimate_uc(
-        s0, iid_dataset, target_policy, gamma, palearner_setting, pmlearner_setting, qlearner_setting, ratiolearner_setting)
+        s0, iid_dataset, target_policy, time_difference, gamma, palearner_setting, pmlearner_setting, qlearner_setting, ratiolearner_setting)
     if new_iid_dataset is None:
         np.random.seed(1)
         target_action_s0 = np.apply_along_axis(target_policy, 1, s0).flatten()
@@ -581,10 +597,10 @@ def opeuc_run(s0, iid_dataset, target_policy, gamma=0.9,
                    'mediator': iid_dataset[2], 'reward': iid_dataset[3],
                    'next_state': iid_dataset[4]}
         opeuc = OPEUC(dataset, qlearner, rationearner,
-                      pmlearner, palearner, gamma, matrix_based_ope, target_policy)
+                      pmlearner, palearner, time_difference, gamma, matrix_based_ope, target_policy)
     else:
         opeuc = OPEUC(new_iid_dataset, qlearner, rationearner,
-                      pmlearner, palearner, gamma, matrix_based_ope, target_policy)
+                      pmlearner, palearner, time_difference, gamma, matrix_based_ope, target_policy)
     opeuc.compute_opeuc()
     return opeuc
 

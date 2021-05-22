@@ -12,6 +12,7 @@ class OPEDR:
     def __init__(self, dataset,
                  QLearner, RatioLearner, PALearner,
                  gamma, target_policy, 
+                 time_difference=None,
                  matrix_based_learning=False, 
                  time_point_num=None):
         '''
@@ -56,6 +57,10 @@ class OPEDR:
         self.ratiolearner = RatioLearner
         self.palearner = PALearner
 
+        if time_difference is None:
+            self.time_difference = np.ones(dataset['action'].shape[0])
+        else:
+            self.time_difference = np.copy(time_difference)
         self.matrix_based_learning = matrix_based_learning
         self.gamma = gamma
         self.time_point_num = time_point_num
@@ -149,7 +154,9 @@ class OPEDR:
         prob_action = self.palearner.get_pa_prediction(state, action)
         q_fix_action = self.qLearner.get_q_prediction(state, action)
         q_long_time = reward
-        q_long_time += self.gamma * self.qLearner.get_q_prediction(next_state, next_policy_action)
+        q_est = self.qLearner.get_q_prediction(next_state, next_policy_action)
+        time_vary_gamma = np.power(self.gamma, self.time_difference)
+        q_long_time += time_vary_gamma * q_est
         q_diff = q_long_time - q_fix_action
         term_I1 = q_diff * ratio_state / prob_action
 
@@ -189,11 +196,13 @@ class OPEDR:
         ratio_state = self.ratiolearner.get_r_prediction(state)
         q_fix_action = self.qLearner.get_q_prediction(state, action)
         q_long_time = np.copy(reward)
+        time_vary_gamma = np.power(self.gamma, self.time_difference)
         for action_value in self.unique_action:
             action_value = np.array([action_value])
             target_next_state_pa = np.apply_along_axis(self.target_policy, 1, next_state, action=action_value).flatten()
             action_value = np.repeat(action_value, next_state.shape[0])
-            q_long_time += self.gamma * self.qLearner.get_q_prediction(next_state, action_value) * target_next_state_pa
+            q_est = self.qLearner.get_q_prediction(next_state, action_value) * target_next_state_pa
+            q_long_time += time_vary_gamma * q_est
         q_diff = q_long_time - q_fix_action
         termI1_complete = q_diff * ratio_state * target_pa / prob_action
 
@@ -205,7 +214,8 @@ class OPEDR:
         target_pa = self.target_policy_pa(self.target_policy, state, action)
         prob_action = self.palearner.get_pa_prediction(state, action)
         term_weight_reward = reward * ratio_state * target_pa / prob_action
-        term_weight_reward = term_weight_reward / (1.0 - self.gamma)
+        time_vary_gamma = np.power(self.gamma, self.time_difference)
+        term_weight_reward = term_weight_reward / (1.0 - time_vary_gamma)
         self.is_arr = np.copy(term_weight_reward)
         term_weight_reward = np.mean(term_weight_reward)
         return term_weight_reward
@@ -307,7 +317,7 @@ class OPEDR:
         return self.opedr
 
 
-def nuisance_estimate_dr(s0, iid_dataset, target_policy, gamma, palearner_setting, qlearner_setting, ratiolearner_setting):
+def nuisance_estimate_dr(s0, iid_dataset, target_policy, time_difference, gamma, palearner_setting, qlearner_setting, ratiolearner_setting):
     ## Train conditional probability of action given state
     discrete_state = palearner_setting['discrete_state']
     rbf_dim = palearner_setting['rbf_dim']
@@ -353,7 +363,8 @@ def nuisance_estimate_dr(s0, iid_dataset, target_policy, gamma, palearner_settin
                 iid_dataset_train = [iid_dataset[0][train_index], iid_dataset[1][train_index], iid_dataset[2][train_index], iid_dataset[3][train_index],
                                   iid_dataset[4][train_index]]
                 qlearner = Qlearner(iid_dataset, target_policy,
-                                    None, palearner, gamma=gamma, epoch=epoch, verbose=verbose, model=model, 
+                                    None, palearner, time_difference=time_difference, 
+                                    gamma=gamma, epoch=epoch, verbose=verbose, model=model,
                                     rbf_dim=rbf_dim_value, use_mediator=False, eps=eps)
                 qlearner.fit()
 
@@ -373,7 +384,8 @@ def nuisance_estimate_dr(s0, iid_dataset, target_policy, gamma, palearner_settin
     else:
         pass
 
-    qlearner = Qlearner(iid_dataset, target_policy, None, palearner, gamma=gamma, epoch=epoch, verbose=verbose, model=model, 
+    qlearner = Qlearner(iid_dataset, target_policy, None, palearner, time_difference=time_difference, 
+                        gamma=gamma, epoch=epoch, verbose=verbose, model=model,
                         rbf_dim=rbf_dim, use_mediator=False, eps=eps)
     qlearner.fit()
 
@@ -407,7 +419,8 @@ def nuisance_estimate_dr(s0, iid_dataset, target_policy, gamma, palearner_settin
                     dataset_train = {'s0': s0[s0_train_index], 'state': iid_dataset[0][train_index], "next_state": iid_dataset[4][train_index],
                                      'action': iid_dataset[1][train_index]}
                     rationearner = RatioLinearLearner(
-                        dataset_train, target_policy, palearner, ndim=rbf_dim_value, use_mediator=False)
+                        dataset_train, target_policy, palearner, time_difference=time_difference, 
+                        ndim=rbf_dim_value, use_mediator=False)
                     rationearner.fit()
 
                     new_s0, new_state, new_action, new_mediator, new_reward, new_next_state = s0[s0_test_index], iid_dataset[0][test_index], iid_dataset[
@@ -428,13 +441,14 @@ def nuisance_estimate_dr(s0, iid_dataset, target_policy, gamma, palearner_settin
         dataset = {'s0': s0, 'state': iid_dataset[0],
                     "next_state": iid_dataset[4], 'action': iid_dataset[1]}
         rationearner = RatioLinearLearner(
-            dataset, target_policy, palearner, ndim=ratio_rbf_dim, use_mediator=False)
+            dataset, target_policy, palearner, time_difference=time_difference, 
+            ndim=ratio_rbf_dim, use_mediator=False)
         rationearner.fit()
         pass
 
     return qlearner, rationearner, palearner
 
-def opedr_run(s0, iid_dataset, target_policy, gamma=0.9,
+def opedr_run(s0, iid_dataset, target_policy, time_difference=None, gamma=0.9,
               palearner_setting={'discrete_state': False, 'rbf_dim': None, 'cv_score': 'accuracy', 'verbose': True},
               qlearner_setting={'epoch': 100, 'trace': True, 'rbf_dim': 5},
               ratiolearner_setting={'mode': 'linear', 'rbf_ndims': 5,
@@ -445,7 +459,7 @@ def opedr_run(s0, iid_dataset, target_policy, gamma=0.9,
     new_iid_dataset: a helpful parameter used for cross fitting
     '''
     qlearner, rationearner, palearner = nuisance_estimate_dr(
-        s0, iid_dataset, target_policy, gamma, palearner_setting, qlearner_setting, ratiolearner_setting)
+        s0, iid_dataset, target_policy, time_difference, gamma, palearner_setting, qlearner_setting, ratiolearner_setting)
     if new_iid_dataset is None:
         np.random.seed(1)
         target_action_s0 = np.apply_along_axis(target_policy, 1, s0).flatten()
@@ -457,10 +471,10 @@ def opedr_run(s0, iid_dataset, target_policy, gamma=0.9,
                    'mediator': iid_dataset[2], 'reward': iid_dataset[3],
                    'next_state': iid_dataset[4]}
         opedr = OPEDR(dataset, qlearner, rationearner,
-                      palearner, gamma, target_policy, matrix_based_ope, time_point_num)
+                      palearner, gamma, target_policy, time_difference, matrix_based_ope, time_point_num)
     else:
         opedr = OPEDR(new_iid_dataset, qlearner, rationearner,
-                      palearner, gamma, target_policy, matrix_based_ope, time_point_num)
+                      palearner, gamma, target_policy, time_difference, matrix_based_ope, time_point_num)
     if opedr2:
         opedr.compute_opedr2()
     else:

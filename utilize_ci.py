@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from scipy.stats import norm
 
 def compute_std(num, time, data_point_estimation):
     trajectory_id = np.repeat(np.arange(num), time)
@@ -8,11 +9,13 @@ def compute_std(num, time, data_point_estimation):
     std_value = df['trajectory_estimation'].to_numpy().std()
     return std_value
 
-def compute_ci(num, time, data_point_estimation):
+def compute_ci(num, time, data_point_estimation, alpha=0.95):
     std_value = compute_std(num, time, data_point_estimation)
     se_value = std_value / np.sqrt(np.array(num*1.0))
     est = np.mean(data_point_estimation)
-    ci = np.array([est - 1.96*se_value, est + 1.96*se_value])
+    norm_alpha = 1 - (1 - alpha) / 2
+    quan_alpha = norm.ppf(norm_alpha)
+    ci = np.array([est - quan_alpha*se_value, est + quan_alpha*se_value])
     return ci
 
 def cover_truth(ci, truth):

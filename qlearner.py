@@ -12,7 +12,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.base import clone
 
 class Qlearner:
-    def __init__(self, data, target_policy, PMLearner, PALearner, gamma=0.9,
+    def __init__(self, data, target_policy, PMLearner, PALearner, time_difference=None, gamma=0.9,
                  epoch=1000, verbose=False, model='forest', rbf_dim=5, use_mediator=True, eps=1e-2):
         '''
 
@@ -52,6 +52,10 @@ class Qlearner:
         self.reward = np.copy(data[3])
         self.pmlearner = PMLearner
         self.palearner = PALearner
+        if time_difference is None:
+            self.time_difference = np.ones(self.reward.shape[0])
+        else:
+            self.time_difference = np.copy(time_difference)
         self.gamma = gamma
 
         self.target_policy = target_policy
@@ -186,7 +190,8 @@ class Qlearner:
             pass
 
         long_term_reward = reward.flatten()
-        long_term_reward += self.gamma * q_next_state
+        # long_term_reward += self.gamma * q_next_state
+        long_term_reward += np.power(self.gamma, self.time_difference) * q_next_state
         # # print("Pesudo response: ", long_term_reward)
         return long_term_reward
 

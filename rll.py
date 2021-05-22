@@ -71,7 +71,7 @@ class RatioLinearLearner:
     res = np.vstack([dim_list, res_list])
     res.transpose()
     '''
-    def __init__(self, dataset, policy, cplearner, gamma=0.9, ndim=100, l2penalty=1.0, use_mediator=True):
+    def __init__(self, dataset, policy, cplearner, time_difference=None, gamma=0.9, ndim=100, l2penalty=1.0, use_mediator=True):
         self.use_mediator = use_mediator
 
         self.state = np.copy(dataset['state'])
@@ -81,6 +81,10 @@ class RatioLinearLearner:
             self.mediator = np.copy(dataset['mediator']).reshape(-1, 1)
         self.next_state = np.copy(dataset['next_state'])
         self.s0 = np.copy(dataset['s0'])
+        if time_difference is None:
+            self.time_difference = np.ones(self.action.shape[0])
+        else:
+            self.time_difference = np.copy(time_difference)
 
         self.policy = policy
         self.cplearner = cplearner
@@ -156,7 +160,9 @@ class RatioLinearLearner:
         pass
     
     def rbf_difference(self, psi, psi_next, ratio):
-        psi_next = self.gamma * (psi_next.transpose() * ratio).transpose()
+        # psi_next = self.gamma * (psi_next.transpose() * ratio).transpose()
+        psi_next = np.multiply((psi_next.transpose() * ratio).transpose(),
+                               np.power(self.gamma, self.time_difference)[:, np.newaxis])
         psi_minus_psi_next = psi - psi_next
         return psi_minus_psi_next
 
