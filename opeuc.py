@@ -107,9 +107,15 @@ class OPEUC:
                             self.reward[i], self.next_state[i], self.policy_action[i])
                 self.eif_arr[i] = self.eif_without_intercept(data_tuple) + intercept
                 # print(self.eif_arr[i])
+                pass
+            pass
+        
         opeuc = np.mean(self.eif_arr)
         self.opeuc = opeuc
         self.intercept = intercept
+
+        self.cis_arr = self.compute_cis(self.state, self.action, self.mediator, self.reward)
+        self.cis = np.mean(self.cis_arr)
 
     def compute_termI1(self, data_tuple):
         state = data_tuple[0].reshape(1, -1)
@@ -410,6 +416,27 @@ class OPEUC:
 
         # intercept = np.mean(intercept)
         return intercept
+
+    def compute_cis(self, state, action, mediator, reward):
+        '''
+        Confounded important sampling method.
+        '''
+        data_point_num = reward.shape
+        weight_pm = np.zeros(data_point_num)
+        for action_prime in self.unique_action:
+            action_prime = action_prime.reshape(1, -1)
+            target_pa = np.apply_along_axis(self.target_policy, 1, state, action=action_prime).flatten()
+            action_prime_batch = np.repeat(action_prime, data_point_num).flatten().reshape(-1, 1)
+            est_pm_value = self.pmlearner.get_pm_prediction(state, action_prime_batch, mediator)
+            weight_pm += target_pa * est_pm_value
+            pass
+        pm_est = self.pmlearner.get_pm_prediction(state, action, mediator)
+        pm_ratio = weight_pm / pm_est
+        is_est = pm_ratio * reward * self.ratiolearner.get_r_prediction(state)
+        time_vary_gamma = np.power(self.gamma, self.time_difference)
+        is_est = is_est / (1 - time_vary_gamma)
+
+        return is_est
 
     def get_opeuc(self):
         return self.opeuc

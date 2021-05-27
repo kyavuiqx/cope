@@ -5,3 +5,6 @@ cope_sim.pbs
 double_robust.txt
 *.pyc
 .Rhistory
+comparison.eps
+comparison.pdf
+coverage.eps
